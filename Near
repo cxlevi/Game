@@ -1,0 +1,103 @@
+using UnityEngine;
+
+public class EnemyAI : MonoBehaviour
+{
+    [Header("Настройки")]
+    public float attackCooldown = 2f; // минимальный интервал между ударами, сек
+    public float attackDistance = 1.5f;
+    public float detectionRadius = 8f;
+    public float moveSpeed = 4f;
+    public float rotationSpeed = 8f;
+
+    public Transform player;
+    public Animator animator;
+
+    private Rigidbody rb;
+    private float lastAttackTime = -Mathf.Infinity; // чтобы первый удар был возможен сразу
+    private bool isAttacking = false; // отслеживаем, идёт ли анимация атаки
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.isKinematic = true;
+            rb.useGravity = false;
+        }
+
+        animator = animator ? animator : GetComponent<Animator>();
+        player = player ? player : GameObject.FindGameObjectWithTag("Player")?.transform;
+    }
+
+    void Update()
+    {
+        if (player == null) return;
+
+        float distance = Vector3.Distance(transform.position, player.position);
+        bool detected = distance <= detectionRadius;
+
+        // 🔁 Обновляем поворот К КАЖДОМУ кадру, даже во время атаки
+        if (detected && !isAttacking) // ← ⚠️ ВАЖНО: НЕ поворачиваемся ВО ВРЕМЯ атаки!
+        {
+            Vector3 dirToPlayer = (player.position - transform.position).normalized;
+            dirToPlayer.y = 0;
+            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dirToPlayer), rotationSpeed * Time.deltaTime);
+        }
+
+        // ⚔️ Проверяем, может ли враг начать атаку
+        if (detected && !isAttacking && distance <= attackDistance)
+        {
+            if (Time.time - lastAttackTime >= attackCooldown && !IsAttackPlaying())
+            {
+                StartAttack();
+            }
+        }
+
+        // 🏃 Движение — ТОЛЬКО если не атакует И игрок вне зоны атаки
+        bool shouldRun = detected && !isAttacking && distance > attackDistance;
+        animator.SetFloat("Speed", shouldRun ? 1f : 0f);
+
+        if (shouldRun)
+        {
+            Vector3 moveDir = transform.forward;
+            moveDir.y = 0;
+            transform.position += moveDir * moveSpeed * Time.deltaTime;
+        }
+        // 👇 Явно закрепляем позицию, если атакуем — на случай "дрейфа"
+        else if (isAttacking)
+        {
+            // Ничего не делаем — НЕ двигаемся, НЕ поворачиваемся
+            // Позиция и поворот "заморожены" на время атаки
+        }
+    }
+
+    void StartAttack()
+    {
+        isAttacking = true;
+        animator.SetTrigger("Attack");
+        lastAttackTime = Time.time;
+    }
+
+    // 📌 Вызывается из Animation Event в конце анимации удара
+    public void OnAttackEnd()
+    {
+        isAttacking = false;
+        // Не сбрасываем Speed — это делает Update, если нужно
+    }
+
+    // 🔍 Проверка, играется ли сейчас анимация удара
+    bool IsAttackPlaying()
+    {
+        if (animator == null) return false;
+        var state = animator.GetCurrentAnimatorStateInfo(0);
+        return state.IsName("Hook Punch"); // ← укажите ТОЧНОЕ имя состояния атаки в Animator!
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, detectionRadius);
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position, attackDistance);
+    }
+}
