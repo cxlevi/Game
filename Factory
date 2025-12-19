@@ -1,0 +1,113 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+public class ProjectileFactory : MonoBehaviour
+{
+    [System.Serializable]
+    public class ProjectileType
+    {
+        public string name;
+        public GameObject prefab;
+        public int poolSize = 10;
+    }
+
+    public static ProjectileFactory Instance;
+
+    public ProjectileType[] projectileTypes;
+
+    private Dictionary<string, Queue<PooledProjectile>> pools = new();
+
+    void Awake()
+    {
+        if (Instance == null)
+            Instance = this;
+        else
+            Destroy(gameObject);
+
+        DontDestroyOnLoad(gameObject);
+        InitializePools();
+    }
+
+    void InitializePools()
+    {
+        foreach (var type in projectileTypes)
+        {
+            Queue<PooledProjectile> pool = new();
+            pools[type.name] = pool;
+
+            for (int i = 0; i < type.poolSize; i++)
+            {
+                GameObject obj = Instantiate(type.prefab);
+                obj.name = $"[{type.name}] Pooled";
+                obj.SetActive(false);
+
+                PooledProjectile proj = obj.GetComponent<PooledProjectile>();
+                if (proj == null)
+                {
+                    proj = obj.AddComponent<PooledProjectile>();
+                    Debug.LogWarning($"Added PooledProjectile to {type.name} prefab");
+                }
+
+                pool.Enqueue(proj);
+            }
+        }
+    }
+
+    public PooledProjectile Fire(string type, Vector3 position, Quaternion rotation, Vector3 direction, float speed = -1)
+    {
+        Debug.Log($"[ProjectileFactory] 🚀 Fire(type: \"{type}\", pos: {position}, dir: {direction}, speed: {speed})");
+
+        if (!pools.TryGetValue(type, out var pool))
+        {
+            Debug.LogError($"[ProjectileFactory] ❌ Pool for '{type}' not found!");
+            return null;
+        }
+
+        Debug.Log($"[ProjectileFactory] 📦 Pool \"{type}\" has {pool.Count} available objects");
+
+        if (pool.Count == 0)
+        {
+            Debug.LogWarning($"[ProjectileFactory] ⚠️ Pool \"{type}\" is empty — creating new instance!");
+            GameObject newObj = Instantiate(GetPrefabByName(type));
+            PooledProjectile newProj = newObj.GetComponent<PooledProjectile>() ?? newObj.AddComponent<PooledProjectile>();
+            newProj.Launch(position, rotation, direction, speed);
+            return newProj;
+        }
+
+        PooledProjectile proj = pool.Dequeue();
+        Debug.Log($"[ProjectileFactory] ✅ Dequeued pooled projectile: {proj.name}");
+
+        proj.gameObject.SetActive(true);
+        proj.Launch(position, rotation, direction, speed);
+
+        return proj;
+    }
+
+    private GameObject GetPrefabByName(string name)
+    {
+        foreach (var type in projectileTypes)
+            if (type.name == name) return type.prefab;
+        return null;
+    }
+
+    // Удобный вызов из врага:
+    public static void FireArrowAtPlayer(Vector3 from, Transform player)
+    {
+        if (Instance == null || player == null) return;
+
+        CapsuleCollider playerCollider = player.GetComponent<CapsuleCollider>();
+        float playerCenterY = player.position.y + (playerCollider?.center.y ?? 0f);
+
+        Vector3 targetPos = new Vector3(player.position.x, playerCenterY, player.position.z);
+        Vector3 dir = (targetPos - from).normalized;
+
+        Instance.Fire("Fireball", from, Quaternion.LookRotation(dir), dir, speed: 20f);
+    }
+
+    public static void FireFireball(Vector3 from, Vector3 to)
+    {
+        if (Instance == null) return;
+        Vector3 dir = (to - from).normalized;
+        Instance.Fire("Fireball", from, Quaternion.LookRotation(dir), dir, speed: 20f);
+    }
+}
