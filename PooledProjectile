@@ -1,0 +1,72 @@
+using UnityEngine;
+
+public class PooledProjectile : MonoBehaviour
+{
+    [Header("Полёт")]
+    public float speed = 15f;
+    public float lifetime = 5f;
+
+    [Header("Попадание")]
+    [SerializeField] private float hitRadius = 1.5f; // ↑ чуть увеличили радиус для надёжности
+
+    // 🔴 ВАЖНО: теперь targetLayers НЕ нужен в Update, но оставим для будущего использования
+    [SerializeField] private LayerMask targetLayers;
+
+    private Vector3 launchDirection; // ← запоминаем направление выстрела
+
+    private void OnEnable()
+    {
+        CancelInvoke();
+        Invoke(nameof(ReturnToPool), lifetime);
+    }
+
+
+    public void Launch(Vector3 position, Quaternion rotation, Vector3 direction, float speedOverride = -1f)
+    {
+        transform.position = position;
+        transform.rotation = rotation;
+        launchDirection = direction.normalized; // ← запоминаем направление
+        speed = speedOverride > 0 ? speedOverride : speed;
+    }
+
+    void Update()
+    {
+        // ✅ Летим в заданном направлении
+        transform.position += launchDirection * speed * Time.deltaTime;
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        Debug.Log($"[OnTriggerEnter] 💥 Столкновение с: {other.name}, tag: {other.tag}, layer: {LayerMask.LayerToName(other.gameObject.layer)}");
+
+        if (other.CompareTag("Player"))
+        {
+            Debug.Log("🎯 Попадание по игроку!");
+            ReturnToPool();
+        }
+        else
+        {
+            Debug.Log($"❌ Не игрок: {other.tag}");
+        }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, hitRadius);
+
+        // 🔦 Визуализация направления полёта (очень полезно!)
+        Gizmos.color = Color.red;
+        Gizmos.DrawLine(transform.position, transform.position + launchDirection * 2f);
+    }
+
+    void ReturnToPool()
+    {
+        // 🔒 Защита от вызова на уничтоженном объекте
+        if (this == null || gameObject == null)
+            return;
+
+        CancelInvoke();
+        gameObject.SetActive(false);
+    }
+}
