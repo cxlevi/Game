@@ -1,0 +1,205 @@
+using UnityEngine;
+using System.Collections;
+
+public interface IProjectile
+{
+    void Launch(Vector3 position, Quaternion rotation, Vector3 direction, float speed);
+    void OnHit();
+}
+
+public class RangedEnemyAI : MonoBehaviour
+{
+    [Header("Ближний бой")]
+    public float meleeRange = 2f;
+
+    [Header("Цель")]
+    public Transform player;
+
+    [Header("Дистанции")]
+    public float detectionRadius = 15f;
+    public float optimalDistance = 8f;
+    public float minSafeDistance = 8f;
+
+    [Header("Движение")]
+    public float moveSpeed = 4f;
+    public float rotationSpeed = 10f;
+
+    [Header("Атака")]
+    public float attackCooldown = 1.5f;
+    public Transform projectileSpawn;
+    public GameObject projectilePrefab;
+    public float projectileSpeed = 15f;
+
+    [Header("Компоненты")]
+    public Animator animator;
+
+    // --- Поля ---
+    private Rigidbody rb;
+    private float lastAttackTime = 0f;
+    private bool isDetected = false;
+    private bool isAttacking = false;
+    private bool isMeleeAttacking = false;
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.isKinematic = true;
+            rb.useGravity = false;
+        }
+
+        animator = animator ? animator : GetComponent<Animator>();
+        player = player ? player : GameObject.FindGameObjectWithTag("Player")?.transform;
+    }
+
+    void Update()
+    {
+        if (player == null) return;
+
+        float distance = Vector3.Distance(transform.position, player.position);
+        isDetected = distance <= detectionRadius;
+
+        if (isDetected)
+        {
+            // Поворот к игроку
+            Vector3 directionToPlayer = (player.position - transform.position).normalized;
+            directionToPlayer.y = 0;
+            transform.rotation = Quaternion.Slerp(
+                transform.rotation,
+                Quaternion.LookRotation(directionToPlayer),
+                rotationSpeed * Time.deltaTime
+            );
+
+            // Движение
+            if (isAttacking || isMeleeAttacking)
+            {
+                animator?.SetFloat("Speed", 0f);
+            }
+            else
+            {
+                if (distance <= meleeRange)
+                {
+                    animator?.SetFloat("Speed", 0f);
+                }
+                else if (distance < minSafeDistance)
+                {
+                    Move(-directionToPlayer);
+                    animator?.SetFloat("Speed", -1f);
+                }
+                else if (distance > optimalDistance + 1f)
+                {
+                    Move(directionToPlayer);
+                    animator?.SetFloat("Speed", 1f);
+                }
+                else
+                {
+                    animator?.SetFloat("Speed", 0f);
+                }
+            }
+
+            // Дальняя атака
+            if (!isAttacking && !isMeleeAttacking &&
+                !IsAttackAnimationPlaying() &&
+                Time.time - lastAttackTime >= attackCooldown &&
+                distance <= optimalDistance + 1f &&
+                distance > meleeRange)
+            {
+                Attack();
+                lastAttackTime = Time.time;
+            }
+
+            // Ближняя атака
+            if (!isAttacking && !isMeleeAttacking &&
+                !IsMeleeAnimationPlaying() &&
+                Time.time - lastAttackTime >= attackCooldown &&
+                distance <= meleeRange)
+            {
+                MeleeAttack();
+                lastAttackTime = Time.time;
+            }
+        }
+        else
+        {
+            // Потерял игрока
+            isAttacking = false;
+            isMeleeAttacking = false;
+            animator?.SetFloat("Speed", 0f);
+        }
+    }
+
+    void Move(Vector3 dir)
+    {
+        Vector3 targetPos = transform.position + dir * moveSpeed * Time.deltaTime;
+        if (rb != null && rb.isKinematic)
+            rb.MovePosition(targetPos);
+        else
+            transform.position = targetPos;
+    }
+
+    // === Дальняя атака ===
+    bool IsAttackAnimationPlaying() =>
+        animator && animator.GetCurrentAnimatorStateInfo(0).IsName("Standing 2H Magic Attack 01");
+
+    void Attack()
+    {
+        isAttacking = true;
+        animator?.SetTrigger("Attack");
+        animator?.SetFloat("Speed", 0f);
+    }
+
+    public void OnAttackEnd()
+    {
+        isAttacking = false;
+    }
+
+    // === Ближняя атака ===
+    bool IsMeleeAnimationPlaying() =>
+        animator && animator.GetCurrentAnimatorStateInfo(0).IsName("Hook Punch");
+
+    void MeleeAttack()
+    {
+        if (isMeleeAttacking) return;
+
+        isMeleeAttacking = true;
+        animator?.SetBool("IsMeleeAttacking", true);
+        animator?.SetFloat("Speed", 0f);
+    }
+
+    public void OnMeleeAttackEnd()
+    {
+        animator?.SetBool("IsMeleeAttacking", false);
+        isMeleeAttacking = false;
+
+        StartCoroutine(RetreatAfterAttack(0.5f));
+    }
+
+    IEnumerator RetreatAfterAttack(float duration)
+    {
+        float endTime = Time.time + duration;
+        Vector3 retreatDir = -transform.forward;
+        retreatDir.y = 0;
+
+        while (Time.time < endTime && player != null)
+        {
+            Move(retreatDir);
+            animator?.SetFloat("Speed", -1f);
+            yield return null;
+        }
+
+        animator?.SetFloat("Speed", 0f);
+    }
+
+    // === Стрельба ===
+    public void FireProjectile()
+    {
+        if (projectileSpawn != null && player != null)
+        {
+            ProjectileFactory.FireArrowAtPlayer(projectileSpawn.position, player);
+        }
+        else
+        {
+            Debug.LogError("[RangedEnemyAI] FireProjectile: Missing projectileSpawn or player.");
+        }
+    }
+}
